@@ -16,14 +16,14 @@ namespace Adaptive.ReactiveTrader.Messaging
         private readonly string _correlationId;
         private readonly Subject<Unit> _subject;
 
-        public PrivateEndpoint(IModel channel, string topic, string correlationId) 
+        public PrivateEndpoint(IModel channel, string topic, string correlationId)
         {
             _channel = channel;
             _topic = topic;
             _correlationId = correlationId;
             _subject = new Subject<Unit>();
 
-            _channel.BasicReturn += OnChannelReturn;
+            _channel.BasicReturn += OnBasicReturn;
             _channel.ModelShutdown += OnModelShutdown;
         }
 
@@ -35,6 +35,8 @@ namespace Adaptive.ReactiveTrader.Messaging
                 var props = _channel.CreateBasicProperties();
                 props.CorrelationId = _correlationId;
                 _channel.BasicPublish(string.Empty, _topic, true, props, body);
+
+                Log.Debug("Publish message to queue {topic} with correlationId {correlationId}", _topic, _correlationId);
             }
             catch (Exception e)
             {
@@ -47,13 +49,20 @@ namespace Adaptive.ReactiveTrader.Messaging
             throw new NotImplementedException(); // TODO
         }
 
+        private void OnBasicReturn(object sender, BasicReturnEventArgs e)
+        {
+            if (e.BasicProperties.ReplyTo == _topic)
+            {
+                TearDown();
+            }
+        }
         private void OnModelShutdown(object sender, ShutdownEventArgs e) => TearDown();
-        private void OnChannelReturn(object sender, BasicReturnEventArgs e) => TearDown();
         private void TearDown()
         {
             _subject.OnNext(Unit.Default);
-            _channel.BasicReturn -= OnChannelReturn;
             _channel.ModelShutdown -= OnModelShutdown;
+            _channel.BasicReturn -= OnBasicReturn;
+            Log.Information($"Enpoint to {_topic} with correlationId {_correlationId} was disposed.");
         }
 
         public IObservable<Unit> TerminationSignal => _subject;
